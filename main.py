@@ -1,10 +1,10 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 import yt_dlp
 import os
 import uuid
 import threading
 
-app = Flask(__name__)
+app = Flask(name)
 DOWNLOAD_DIR = '/tmp/ytdlp'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -16,17 +16,28 @@ def cleanup(filepath):
 
 def get_ydl_opts(filepath=None):
     opts = {
-        'format': 'best[ext=mp4][height<=720]/best[ext=mp4]/best',
+        # Eng kichik + audio bor format — tezroq yuklanadi
+        'format': (
+            'bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/'
+            'best[ext=mp4][height<=480]/'
+            'best[ext=mp4][height<=720]/'
+            'best[ext=mp4]/best'
+        ),
         'quiet': True,
         'no_warnings': True,
-        'socket_timeout': 30,
-        # TV client - cookie talab qilmaydi
+        'socket_timeout': 20,
+        'retries': 3,
+        'merge_output_format': 'mp4',
         'extractor_args': {
             'youtube': {
                 'player_client': ['tv_embedded'],
                 'player_skip': ['webpage', 'configs'],
             }
         },
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4',
+        }],
     }
     if filepath:
         opts['outtmpl'] = filepath
@@ -44,7 +55,18 @@ def info():
     if not url:
         return jsonify({'success': False, 'error': 'url yoq'}), 400
     try:
-        with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
+        opts = {
+            'quiet': True,
+            'skip_download': True,
+            'socket_timeout': 15,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['tv_embedded'],
+                    'player_skip': ['webpage', 'configs'],
+                }
+            },
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
             data = ydl.extract_info(url, download=False)
         return jsonify({
             'success'  : True,
@@ -62,10 +84,11 @@ def download():
         return jsonify({'success': False, 'error': 'url yoq'}), 400
 
     filename = str(uuid.uuid4())
-    filepath = os.path.join(DOWNLOAD_DIR, filename + '.mp4')
+    outtmpl = os.path.join(DOWNLOAD_DIR, filename + '.%(ext)s')
 
     try:
-        with yt_dlp.YoutubeDL(get_ydl_opts(os.path.join(DOWNLOAD_DIR, filename + '.%(ext)s'))) as ydl:
+        opts = get_ydl_opts(outtmpl)
+        with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
 
         # Yuklangan faylni topish
@@ -92,13 +115,18 @@ def download():
             }), 400
 
         threading.Thread(target=cleanup, args=(actual,), daemon=True).start()
-        return send_file(actual, mimetype='video/mp4', as_attachment=True, download_name='video.mp4')
+        return send_file(
+            actual,
+            mimetype='video/mp4',
+            as_attachment=True,
+            download_name='video.mp4'
+        )
 
     except yt_dlp.utils.DownloadError as e:
         return jsonify({'success': False, 'error': str(e)}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-if __name__ == '__main__':
+if name == 'main':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
