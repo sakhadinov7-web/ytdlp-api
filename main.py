@@ -4,7 +4,7 @@ import os
 import uuid
 import threading
 
-app = Flask(name)
+app = Flask(__name__)
 DOWNLOAD_DIR = '/tmp/ytdlp'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
